@@ -375,6 +375,19 @@ class Package:
         f.close()
         return self.file_list
 
+    def get_data_members(self):
+        if not self.fn:
+            sys.stderr.write("Package '%s' has empty fn, returning empty filelist\n" % (self.package))
+            return []
+        f = open(self.fn, "rb")
+        ar = arfile.ArFile(f, self.fn)
+        tarStream = ar.open("data.tar.gz")
+        tarf = tarfile.open("data.tar.gz", "r", tarStream)
+        member_list = tarf.getmembers()
+        f.close()
+
+        return member_list
+
     def set_package_extension(self, ext="ipk"):
         self.file_ext_opk = ext
 

@@ -1,0 +1,101 @@
+#!/usr/bin/env python
+#
+# vim:sw=4:ts=4:expandtab
+#
+# Note: We could have use the list() method of tarfile to get the file content
+#  but it does not set the first bit of the ls output...
+
+import datetime
+import opkg
+import os
+import sys
+import stat
+
+def usage():
+    sys.stderr.write("%s file.ipk\n" % sys.argv[0])
+    sys.exit(1)
+
+if len(sys.argv) < 2:
+    usage()
+
+def file_permission_to_string(member):
+    string = ""
+
+    if member.isfile() is True:
+        string += "-"
+    elif member.isdir() is True:
+        string += "d"
+    elif member.issym() is True:
+        string += "l"
+    elif member.islnk() is True:
+        string += "-"
+    elif member.ischr() is True:
+        string += "c"
+    elif member.isblk() is True:
+        string += "b"
+    elif member.isfifo() is True:
+        string += "p"
+    else:
+        string += "?"
+
+    string += "r" if member.mode & stat.S_IRUSR != 0 else "-"
+    string += "w" if member.mode & stat.S_IWUSR != 0 else "-"
+    string += "x" if member.mode & stat.S_IXUSR != 0 else "-"
+    string += "r" if member.mode & stat.S_IRGRP != 0 else "-"
+    string += "w" if member.mode & stat.S_IWGRP != 0 else "-"
+    string += "x" if member.mode & stat.S_IXGRP != 0 else "-"
+    string += "r" if member.mode & stat.S_IROTH != 0 else "-"
+    string += "w" if member.mode & stat.S_IWOTH != 0 else "-"
+    string += "x" if member.mode & stat.S_IXOTH != 0 else "-"
+
+    return string
+
+def tarinfo_ls(tarinfos):
+    col_size_length = max(len("%s" % tarinfo.size) for tarinfo in tarinfos)
+    col_uname_length = max(len(tarinfo.uname) for tarinfo in tarinfos)
+    col_gname_length = max(len(tarinfo.gname) for tarinfo in tarinfos)
+
+    for tarinfo in tarinfos:
+        string_permission = file_permission_to_string(tarinfo)
+        string = ""
+        string += string_permission
+        string += " %.*s" % (col_uname_length, tarinfo.uname)
+        string += " %.*s" % (col_gname_length, tarinfo.gname)
+        string += " %*d" % (col_size_length, tarinfo.size)
+        t = datetime.datetime.fromtimestamp(tarinfo.mtime)
+        string += " " + t.strftime("%Y-%m-%d %H:%M:%S")
+        string += " %s" % (tarinfo.name)
+
+        print(string)
+
+    return 0
+
+def opkg_ls(package, header = False):
+    if not os.path.isfile(package):
+        sys.stderr.write("%s: %s doesn't exist\n" % (sys.argv[0], package))
+        return 1
+
+    tarinfos = opkg.Package(package).get_data_members()
+
+    if header is True:
+        print("%s:" % package)
+        print("total %d" % sum(tarinfo.size for tarinfo in tarinfos))
+
+    tarinfo_ls(tarinfos)
+
+rc = 0
+
+packages = sys.argv[1:]
+if len(packages) > 1:
+    for package in packages:
+        try:
+            opkg_ls(package, True)
+        except:
+            sys.stderr.write("%s: Error while opening %s\n" % (sys.argv[0],
+                                                               package))
+            rc = 1
+        print("")
+else:
+    rc = opkg_ls(sys.argv[1])
+
+sys.exit(rc)
