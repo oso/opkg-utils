@@ -65,6 +65,8 @@ def tarinfo_ls(tarinfos):
         t = datetime.datetime.fromtimestamp(tarinfo.mtime)
         string += " " + t.strftime("%Y-%m-%d %H:%M:%S")
         string += " %s" % (tarinfo.name)
+        if tarinfo.issym() or tarinfo.islnk():
+            string += " -> %s" % (tarinfo.linkname)
 
         print(string)
 
