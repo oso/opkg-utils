@@ -388,6 +388,17 @@ class Package:
 
         return member_list
 
+    def extractfile(self, filename):
+        if not self.fn:
+            return None
+        f = open(self.fn, "rb")
+        ar = arfile.ArFile(f, self.fn)
+        tarStream = ar.open("data.tar.gz")
+        tarf = tarfile.open("data.tar.gz", "r", tarStream)
+        fh = tarf.extractfile(filename)
+
+        return fh
+
     def set_package_extension(self, ext="ipk"):
         self.file_ext_opk = ext
 
