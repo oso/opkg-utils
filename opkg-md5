@@ -11,7 +11,7 @@ import os
 import sys
 import stat
 import md5
-from opkg_hash import opkg_hash
+from opkg_hash import opkg_print_hash
 
 def usage():
     sys.stderr.write("%s file.ipk\n" % sys.argv[0])
@@ -26,13 +26,13 @@ packages = sys.argv[1:]
 if len(packages) > 1:
     for package in packages:
         try:
-            opkg_hash(package, md5, True)
+            opkg_print_hash(package, md5, True)
         except:
             sys.stderr.write("%s: Error while opening %s\n" % (sys.argv[0],
                                                                package))
             rc = 1
         print("")
 else:
-    rc = opkg_hash(sys.argv[1], md5)
+    rc = opkg_print_hash(sys.argv[1], md5)
 
 sys.exit(rc)

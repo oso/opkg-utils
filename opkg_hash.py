@@ -14,6 +14,7 @@ import md5
 import sha
 
 def opkg_data_hash(pkg, hfn):
+    hlist = {}
     tarinfos = pkg.get_data_members()
     for tarinfo in tarinfos:
         if tarinfo.isfile() is False:
@@ -30,9 +31,11 @@ def opkg_data_hash(pkg, hfn):
 
         f.close()
 
-        print("%s\t%s" % (h.hexdigest(), tarinfo.name))
+        hlist[tarinfo.name] = h.hexdigest()
 
-def opkg_hash(package, hfn = md5, header = False):
+    return hlist
+
+def opkg_print_hash(package, hfn = md5, header = False):
     if not os.path.isfile(package):
         sys.stderr.write("%s: %s doesn't exist\n" % (sys.argv[0], package))
         return 1
@@ -43,4 +46,6 @@ def opkg_hash(package, hfn = md5, header = False):
     if header is True:
         print("%s:" % package)
 
-    opkg_data_hash(pkg, hfn)
+    hlist = opkg_data_hash(pkg, hfn)
+    for fname, h in hlist.items():
+        print("%s\t%s" % (h, fname))
