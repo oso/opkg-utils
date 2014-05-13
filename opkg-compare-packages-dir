@@ -1,0 +1,78 @@
+#!/usr/bin/env python
+from __future__ import print_function
+import glob
+import md5
+import os
+import sys
+
+from opkg import Package
+from opkg_hash import opkg_data_hash
+
+def log(msg):
+	print(msg, file = sys.stderr)
+
+def warning(msg):
+	print("WARNING: " + msg, file = sys.stderr)
+
+def error(msg):
+	print("ERROR: " + msg, file = sys.stderr)
+
+def list_packages(directory):
+	pkgs = {}
+	ipk_list = glob.glob("%s/*.ipk" % directory)
+	for ipk in ipk_list:
+		pkg = Package(ipk)
+		name = "%s_%s" % (pkg.package, pkg.version)
+		pkgs[name] = pkg
+
+	return pkgs
+
+def is_package_consistent(pkga, pkgb):
+	hlista = opkg_data_hash(pkga, md5)
+	hlistb = opkg_data_hash(pkgb, md5)
+
+	if len(set(hlista.items()) & set(hlistb.items())):
+		return False
+
+	return True
+
+def list_inconsistent_packages(pkgsa, pkgsb):
+	pkgs = []
+	pkgs_common = set(pkgsa) & set(pkgsb)
+	for pkg in pkgs_common:
+		if is_package_consistent(pkgsa[pkg], pkgsb[pkg]) is False:
+			pkgs.append(pkg)
+	return pkgs
+
+def compare_releases(dira, dirb):
+	pkgsa = list_packages(dira)
+	pkgsb = list_packages(dirb)
+
+	pkgs_all = set(pkgsa) | set(pkgsb)
+	pkgs_common = set(pkgsa) & set(pkgsb)
+	pkgs_removed = set(pkgsa) - set(pkgsb)
+	pkgs_added = set(pkgsb) - set(pkgsa)
+
+	pkg_name_maxlen = max(set(len(pkg.split("_")[0]) for pkg in pkgs_all))
+	pkg_ver_maxlen = max(set(len(pkg.split("_")[1]) for pkg in pkgs_all))
+
+	print("%-*s %s" % (pkg_name_maxlen, "Added packages:", "Version"))
+	for pkg in sorted(pkgs_added):
+		print("%-*s %s" % (pkg_name_maxlen, pkgsb[pkg].package,
+				   pkgsb[pkg].version))
+
+	print("\n%-*s %s" % (pkg_name_maxlen, "Removed packages:", "Version"))
+	for pkg in sorted(pkgs_removed):
+		print("%-*s %s" % (pkg_name_maxlen, pkgsa[pkg].package,
+				   pkgsa[pkg].version))
+
+#	pkgs_inconsistents = list_inconsistent_packages(pkgsa, pkgsb)
+#	if len(pkgs_inconsistents) > 0:
+#		print("\n%-*s %s" % (pkg_name_maxlen, "Inconsistent packages:",
+#			             "Version"))
+#		for pkg in pkgs_common:
+#			print("%-*s %s" % (pkg_name_maxlen, pkgsa[pkg].package,
+#					   pkgsa[pkg].version))
+
+if __name__ == "__main__":
+	compare_releases(sys.argv[1], sys.argv[2])
