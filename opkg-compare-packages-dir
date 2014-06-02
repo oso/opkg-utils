@@ -22,29 +22,12 @@ def list_packages(directory):
 	ipk_list = glob.glob("%s/*.ipk" % directory)
 	for ipk in ipk_list:
 		pkg = Package(ipk)
-		name = "%s_%s" % (pkg.package, pkg.version)
-		pkgs[name] = pkg
+		pkgs[pkg.package] = pkg.version
+		del pkg
 
 	return pkgs
 
-def is_package_consistent(pkga, pkgb):
-	hlista = opkg_data_hash(pkga, md5)
-	hlistb = opkg_data_hash(pkgb, md5)
-
-	if len(set(hlista.items()) & set(hlistb.items())):
-		return False
-
-	return True
-
-def list_inconsistent_packages(pkgsa, pkgsb):
-	pkgs = []
-	pkgs_common = set(pkgsa) & set(pkgsb)
-	for pkg in pkgs_common:
-		if is_package_consistent(pkgsa[pkg], pkgsb[pkg]) is False:
-			pkgs.append(pkg)
-	return pkgs
-
-def compare_releases(dira, dirb):
+def compare_releases(dira, dirb, output_format):
 	pkgsa = list_packages(dira)
 	pkgsb = list_packages(dirb)
 
@@ -52,27 +35,65 @@ def compare_releases(dira, dirb):
 	pkgs_common = set(pkgsa) & set(pkgsb)
 	pkgs_removed = set(pkgsa) - set(pkgsb)
 	pkgs_added = set(pkgsb) - set(pkgsa)
+	pkgs_upgraded = set(pkg for pkg in pkgs_common
+			    if pkgsa[pkg] != pkgsb[pkg])
+	pkgs_changed = pkgs_added | pkgs_removed | pkgs_upgraded
 
-	pkg_name_maxlen = max(set(len(pkg.split("_")[0]) for pkg in pkgs_all))
-	pkg_ver_maxlen = max(set(len(pkg.split("_")[1]) for pkg in pkgs_all))
+	pkg_name_maxlen = max(set(len(pkg) for pkg in pkgs_changed) |
+			      set([len("Removed packages:")]))
+	pkg_ver_maxlen = max(set(len(pkgsa[pkg]) for pkg in pkgs_removed) |
+			     set(len(pkgsb[pkg]) for pkg in pkgs_added) |
+			     set(len(pkgsa[pkg]) for pkg in pkgs_upgraded) |
+			     set([len("Old version")]))
 
-	print("%-*s %s" % (pkg_name_maxlen, "Added packages:", "Version"))
-	for pkg in sorted(pkgs_added):
-		print("%-*s %s" % (pkg_name_maxlen, pkgsb[pkg].package,
-				   pkgsb[pkg].version))
+	if output_format == "csv":
+		print("%s,%s" % ("Added packages", "Version"))
+		for pkg in sorted(pkgs_added):
+			print("%s,%s" % (pkg, pkgsb[pkg]))
 
-	print("\n%-*s %s" % (pkg_name_maxlen, "Removed packages:", "Version"))
-	for pkg in sorted(pkgs_removed):
-		print("%-*s %s" % (pkg_name_maxlen, pkgsa[pkg].package,
-				   pkgsa[pkg].version))
+		print("\n%s,%s" % ("Removed packages", "Version"))
+		for pkg in sorted(pkgs_removed):
+			print("%s,%s" % (pkg, pkgsa[pkg]))
 
-#	pkgs_inconsistents = list_inconsistent_packages(pkgsa, pkgsb)
-#	if len(pkgs_inconsistents) > 0:
-#		print("\n%-*s %s" % (pkg_name_maxlen, "Inconsistent packages:",
-#			             "Version"))
-#		for pkg in pkgs_common:
-#			print("%-*s %s" % (pkg_name_maxlen, pkgsa[pkg].package,
-#					   pkgsa[pkg].version))
+		print("\n%s,%s,%s" % ("Upgraded packages", "Old version",
+				    "New version"))
+		for pkg in sorted(pkgs_upgraded):
+			print("%s,%s,%s" % (pkg, pkgsa[pkg], pkgsb[pkg]))
+	else:
+		print("%-*s %s" % (pkg_name_maxlen, "Added packages:",
+				   "Version"))
+		for pkg in sorted(pkgs_added):
+			print("%-*s %s" % (pkg_name_maxlen, pkg, pkgsb[pkg]))
+
+		print("\n%-*s %s" % (pkg_name_maxlen, "Removed packages:",
+				     "Version"))
+		for pkg in sorted(pkgs_removed):
+			print("%-*s %s" % (pkg_name_maxlen, pkg, pkgsa[pkg]))
+
+		print("\n%-*s %-*s %-*s" % (pkg_name_maxlen, "Upgraded packages:",
+					    pkg_ver_maxlen, "Old version",
+					    pkg_ver_maxlen, "New version"))
+		for pkg in sorted(pkgs_upgraded):
+			print("%-*s %-*s %-*s" % (pkg_name_maxlen, pkg,
+						  pkg_ver_maxlen, pkgsa[pkg],
+						  pkg_ver_maxlen, pkgsb[pkg]))
 
 if __name__ == "__main__":
-	compare_releases(sys.argv[1], sys.argv[2])
+	output_format = None
+	dira, dirb = None, None
+	for argv in sys.argv[1:]:
+		if argv[0] != '-':
+			if dira is None:
+				dira = argv
+			elif dirb is None:
+				dirb = argv
+			else:
+				print("Both directories already set")
+				sys.exit(1)
+		elif argv == "-c" or argv == "--csv":
+			output_format = 'csv'
+		else:
+			print("Invalid arguments (%s)", argv)
+			sys.exit(1)
+
+	compare_releases(dira, dirb, output_format)
