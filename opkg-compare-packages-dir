@@ -40,7 +40,7 @@ def compare_releases(dira, dirb, output_format):
 	pkgs_changed = pkgs_added | pkgs_removed | pkgs_upgraded
 
 	pkg_name_maxlen = max(set(len(pkg) for pkg in pkgs_changed) |
-			      set([len("Removed packages:")]))
+			      set([len("Upgraded packages:")]))
 	pkg_ver_maxlen = max(set(len(pkgsa[pkg]) for pkg in pkgs_removed) |
 			     set(len(pkgsb[pkg]) for pkg in pkgs_added) |
 			     set(len(pkgsa[pkg]) for pkg in pkgs_upgraded) |
