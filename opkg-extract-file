@@ -2,18 +2,13 @@
 
 set -e
 
-if [ $# -lt 1 ]; then
+if [ ! $# -eq 2 ]; then
 	echo "usage: $0: package.opk filename ..."
 	exit 1
 fi
 
-if [ $# -eq 2 ]; then
-  opkgfilename=$1
-  filename=$2
-else
-  echo "usage: $0 opkgfilename filename"  
-  exit -1
-fi
+opkgfilename=$(readlink -f $1)
+filename=$2
 
 case $opkgfilename in
 http:*)
@@ -37,7 +32,8 @@ pkgdir=$tmpdir/`basename $opkgfilename | sed 's/.*\///;s/.opk$//;s/.deb$//;s/.ip
 mkdir -p $pkgdir/CONTROL
 
 cur_dir=$PWD
-cd $pkgdir; (ar x $cur_dir/$opkgfilename || tar zxf $cur_dir/$opkgfilename) >& /dev/null
+cd $pkgdir
+(ar x $opkgfilename || tar zxf $opkgfilename) >& /dev/null
 cd $cur_dir
 
 tar xzf $pkgdir/data.tar.gz -C $pkgdir
