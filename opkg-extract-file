@@ -40,7 +40,7 @@ tar xzf $pkgdir/data.tar.gz -C $pkgdir
 tar xzf $pkgdir/control.tar.gz -C $pkgdir/CONTROL
 rm -f $pkgdir/control.tar.gz $pkgdir/data.tar.gz $pkgdir/debian-binary
 
-cp $pkgdir/$filename `basename $filename`
+mv $pkgdir/$filename `basename $filename` || rm -fr $tmpdir
 ls -l `basename $filename`
 file `basename $filename`
 rm -fr $tmpdir
