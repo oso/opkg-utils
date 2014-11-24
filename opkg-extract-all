@@ -1,0 +1,74 @@
+#!/bin/sh
+
+set -e
+
+if [ $# -lt 1 ]; then
+	echo "usage: $(basename $0) [-c -d directory] package.opk ..."
+	exit 1
+fi
+
+tmpdir=/tmp/opkg-extract-$$
+extractdir=$PWD
+ctrlfile=false
+
+while (( "$#" )); do
+	case $1 in
+	-c)
+		ctrlfile=true
+		;;
+	-d)
+		extractdir=$(readlink -f $2)
+		if [ ! -d $extractdir ]; then
+			echo "ERROR: invalid directory ($extractdir)"
+			exit 1
+		fi
+		shift
+		;;
+	*)
+		opkgfile=$(readlink -f $1)
+		if [ ! -f "$opkgfile" ]; then
+			echo "ERROR: file $opkgfile does not exist!" >&2
+			exit 1
+		fi
+
+		opkgfiles+="$opkgfile "
+		;;
+	esac
+
+	shift
+done
+
+if [ -z "$opkgfiles" ]; then
+	echo "ERROR: No opkg file specified in cmdline"
+	exit 1
+fi
+
+finish() {
+	rm -rf $tmpdir
+}
+trap finish EXIT
+
+mkdir $tmpdir
+
+for opkgfile in $opkgfiles; do
+	echo "Extracting $(basename $opkgfile)..." >&2
+
+	pkgdir=$tmpdir/`basename $opkgfile | sed 's/.*\///;s/.opk$//;s/.deb$//;s/.ipk$//'`
+
+	mkdir $pkgdir
+	cd $pkgdir
+	(ar x $opkgfile || tar zxf $opkgfile) >& /dev/null
+	cd $extractdir
+
+	tar xzf $pkgdir/data.tar.gz -C $pkgdir
+
+	if [ "$ctrlfile" == true ]; then
+		mkdir -p $pkgdir/CONTROL
+		tar xzf $pkgdir/control.tar.gz -C $pkgdir/CONTROL
+	fi
+
+	rm -f $pkgdir/control.tar.gz $pkgdir/data.tar.gz $pkgdir/debian-binary
+	mv $pkgdir/{*,.[!.]*} . &>/dev/null || true
+	rm -rf $pkgdir
+done
+
