@@ -426,8 +426,12 @@ class Package(object):
             return []
         f = open(self.fn, "rb")
         ar = arfile.ArFile(f, self.fn)
-        tarStream = ar.open("data.tar.gz")
-        tarf = tarfile.open("data.tar.gz", "r", tarStream)
+        try:
+            tarStream = ar.open("data.tar.gz")
+            tarf = tarfile.open("data.tar.gz", "r", tarStream)
+        except IOError:
+            tarStream = ar.open("data.tar.xz")
+            tarf = tarfile.open("data.tar.xz", "r:xz", tarStream)
         member_list = tarf.getmembers()
         f.close()
 
@@ -438,8 +442,12 @@ class Package(object):
             return None
         f = open(self.fn, "rb")
         ar = arfile.ArFile(f, self.fn)
-        tarStream = ar.open("data.tar.gz")
-        tarf = tarfile.open("data.tar.gz", "r", tarStream)
+        try:
+            tarStream = ar.open("data.tar.gz")
+            tarf = tarfile.open("data.tar.gz", "r", tarStream)
+        except:
+            tarStream = ar.open("data.tar.xz")
+            tarf = tarfile.open("data.tar.xz", "r:xz", tarStream)
         fh = tarf.extractfile(filename)
 
         return fh
