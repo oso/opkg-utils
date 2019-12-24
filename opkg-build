@@ -1,13 +1,18 @@
-#!/bin/sh
+#!/bin/bash
+# SPDX-License-Identifier: GPL-2.0-only
+: <<=cut
+=head1 NAME
 
-# opkg-build -- construct a .opk from a directory
+opkg-build - construct an .opk from a directory
+
+=cut
 # Carl Worth <cworth@east.isi.edu>
 # based on a script by Steve Redler IV, steve@sr-tech.com 5-21-2001
 # 2003-04-25 rea@sr.unh.edu
 #   Updated to work on Familiar Pre0.7rc1, with busybox tar.
 #   Note it Requires: binutils-ar (since the busybox ar can't create)
-#   For UID debugging it needs a better "find".
 set -e
+set -o pipefail
 
 version=1.0
 
@@ -47,12 +52,16 @@ pkg_appears_sane() {
 
 	PKG_ERROR=0
 
-	tilde_files=`find . -name '*~'`
+	tilde_files=`find . -name '*~' -ls -printf '\\\n'`
 	if [ -n "$tilde_files" ]; then
 	    if [ "$noclean" = "1" ]; then
 		echo "*** Warning: The following files have names ending in '~'.
 You probably want to remove them: " >&2
-		ls -ld $tilde_files
+		echo -e $tilde_files
+		if [ $? -ne 0 ]; then
+			echo "*** Error: Fail to list files have names ending in '~'."
+			exit 1
+		fi
 		echo >&2
 	    else
 		echo "*** Removing the following files: $tilde_files"
@@ -60,12 +69,16 @@ You probably want to remove them: " >&2
 	    fi
 	fi
 
-	large_uid_files=`find . -uid +99 || true`
+	large_uid_files=`find . -uid +99 -ls -printf '\\\n' || true`
 
 	if [ "$ogargs" = "" ]  && [ -n "$large_uid_files" ]; then
 		echo "*** Warning: The following files have a UID greater than 99.
 You probably want to chown these to a system user: " >&2
-		ls -ld $large_uid_files
+		echo -e $large_uid_files
+		if [ $? -ne 0 ]; then
+			echo "*** Error: Fail to list files have a UID greater than 99."
+			exit 1
+		fi
 		echo >&2
 	fi
 	    
@@ -79,8 +92,9 @@ You probably want to chown these to a system user: " >&2
 	pkg=`required_field Package`
 	[ "$?" -ne 0 ] && PKG_ERROR=1
 
-	version=`required_field Version | sed 's/Version://; s/^.://g;'`
+	version=`required_field Version`
 	[ "$?" -ne 0 ] && PKG_ERROR=1
+	version=`echo $version | sed 's/Version://; s/^.://g;'`
 
 	arch=`required_field Architecture`
 	[ "$?" -ne 0 ] && PKG_ERROR=1
@@ -91,35 +105,11 @@ You probably want to chown these to a system user: " >&2
 	required_field Description >/dev/null
 	[ "$?" -ne 0 ] && PKG_ERROR=1
 
-	section=`required_field Section`
-	[ "$?" -ne 0 ] && PKG_ERROR=1
-	if [ -z "$section" ]; then
-	    echo "The Section field should have one of the following values:" >&2
-	    echo "admin, base, comm, editors, extras, games, graphics, kernel, libs, misc, net, text, web, x11" >&2
-	fi
-
-	priority=`required_field Priority`
-	[ "$?" -ne 0 ] && PKG_ERROR=1
-	if [ -z "$priority" ]; then
-	    echo "The Priority field should have one of the following values:" >&2
-	    echo "required, important, standard, optional, extra." >&2
-	    echo "If you don't know which priority value you should be using, then use \`optional'" >&2
-	fi
-
-	source=`required_field Source`
-	[ "$?" -ne 0 ] && PKG_ERROR=1
-	if [ -z "$source" ]; then
-	    echo "The Source field contain the URL's or filenames of the source code and any patches" 
-	    echo "used to build this package.  Either gnu-style tarballs or Debian source packages "
-	    echo "are acceptable.  Relative filenames may be used if they are distributed in the same"
-	    echo "directory as the .opk file."
-	fi
-
 	disallowed_filename=`disallowed_field Filename`
 	[ "$?" -ne 0 ] && PKG_ERROR=1
 
 	if echo $pkg | grep '[^a-z0-9.+-]'; then
-		echo "*** Error: Package name $name contains illegal characters, (other than [a-z0-9.+-])" >&2
+		echo "*** Error: Package name $pkg contains illegal characters, (other than [a-z0-9.+-])" >&2
 		PKG_ERROR=1;
 	fi
 
@@ -159,8 +149,57 @@ ogargs=""
 outer=ar
 noclean=0
 opkext=0
-usage="Usage: $0 [-c] [-C] [-O] [-o owner] [-g group] <pkg_directory> [<destination_directory>]"
-while getopts "cCg:ho:vO" opt; do
+compressor=gzip
+zipargs="-9n"
+compressorargs=""
+
+# Determine if tar supports the --format argument by checking the help output.
+#
+# This is needed because:
+#    - Busybox tar doesn't support '--format'
+#    - On some Linux distros, tar now defaults to posix format if '--format'
+#      isn't explicitly specified
+#    - Opkg doesn't currently support posix format archives
+#
+# It's easier to check for mention of the '--format' option than to detect the
+# tar implementation and maintain a list of which support '--format'.
+tarformat=""
+if tar --help 2>&1 | grep -- "--format" > /dev/null;
+then
+    tarformat="--format=gnu"
+fi
+
+compressor_ext() {
+    case $1 in
+	gzip|pigz)
+	    echo gz
+	    ;;
+	bzip2)
+	    echo bz2
+	    ;;
+	xz)
+	    echo xz
+	    ;;
+	lz4)
+	    echo lz4
+	    ;;
+
+	*)
+	    echo "*** Error: unsupported compression scheme: $1" >&2
+	    exit 1
+	    ;;
+    esac
+}
+
+: <<=cut
+=head1 SYNOPSIS
+
+B<opkg-build> [B<-c>] [B<-C>] [B<-Z> I<compressor>] [B<-a>] [B<-O>] [B<-o> I<owner>] [B<-g> I<group>] I<pkg_directory> [I<destination_directory>]
+
+=cut
+
+usage="Usage: $0 [-c] [-C] [-Z compressor] [-a] [-O] [-o owner] [-g group] <pkg_directory> [<destination_directory>]"
+while getopts "a:cCg:ho:vOZ:" opt; do
     case $opt in
 	o ) owner=$OPTARG
 	    ogargs="--owner=$owner"
@@ -170,22 +209,47 @@ while getopts "cCg:ho:vO" opt; do
 	g ) group=$OPTARG
 	    ogargs="$ogargs --group=$group"
 	    ;;
-        c ) outer=tar
-            ;;
-        C ) noclean=1
-            ;;
+	c ) outer=tar
+	    ;;
+	C ) noclean=1
+	    ;;
+	Z ) compressor=$OPTARG
+	    ;;
+	a ) compressorargs=$OPTARG
+	    ;;
 	v ) echo $version
 	    exit 0
 	    ;;
-	h ) 	
-	    echo $usage  >&2 
+	h )
+	    echo $usage  >&2
 	    exit 0
 	    ;;
-	\? ) 	
+	\? )
 	    echo $usage  >&2
-	esac
+    esac
 done
 
+cext=$(compressor_ext $compressor)
+
+# pgzip requires -T to avoid timestamps on the gzip archive
+if gzip --help 2>&1 | grep -- "-T" > /dev/null; then
+	zipargs="-9nT"
+fi
+
+if [ compressorargs = "" ] ; then
+	if [ $compressor = "gzip" ] ; then
+		compressorargs=$zipargs
+	elif [ $compressor = "pigz" ] ; then
+		if $compressor --help 2>&1 | grep -- "-T" > /dev/null; then
+			compressorargs="-9nT"
+		fi
+	fi
+fi
+
+tsortargs=
+if tar --help 2>&1 | grep -- "--sort=" > /dev/null; then
+	tsortargs="--sort=name"
+fi
 
 shift $(($OPTIND - 1))
 
@@ -232,10 +296,21 @@ fi
 tmp_dir=$dest_dir/IPKG_BUILD.$$
 mkdir $tmp_dir
 
-echo $CONTROL > $tmp_dir/tarX
-( cd $pkg_dir && tar $ogargs -X $tmp_dir/tarX -cz --format=gnu -f $tmp_dir/data.tar.gz . )
-( cd $pkg_dir/$CONTROL && tar $ogargs -cz --format=gnu -f $tmp_dir/control.tar.gz . )
-rm $tmp_dir/tarX
+build_date="${SOURCE_DATE_EPOCH:-$(date +%s)}"
+
+mtime_args=""
+# --clamp-mtime requires tar > 1.28. Only use it if SOURCE_DATE_EPOCH is set, to avoid having a generic case dependency on tar > 1.28.
+# this setting will make sure files generated at build time have consistent mtimes, for reproducible builds.
+if [ ! -z "$SOURCE_DATE_EPOCH"  ]; then
+    mtime_args="--mtime=@$build_date --clamp-mtime"
+fi
+
+( cd $pkg_dir/$CONTROL && find . -type f > $tmp_dir/control_list )
+( cd $pkg_dir && find . -path ./$CONTROL -prune -o -path . -o -print  > $tmp_dir/file_list )
+( cd $pkg_dir && tar $ogargs $tsortargs --no-recursion $mtime_args -c $tarformat -T $tmp_dir/file_list | $compressor $compressorargs > $tmp_dir/data.tar.$cext )
+( cd $pkg_dir/$CONTROL && tar $ogargs $tsortargs --no-recursion --mtime=@$build_date -c $tarformat -T $tmp_dir/control_list | gzip $zipargs > $tmp_dir/control.tar.gz )
+rm $tmp_dir/file_list
+rm $tmp_dir/control_list
 
 echo "2.0" > $tmp_dir/debian-binary
 
@@ -247,12 +322,72 @@ fi
 
 rm -f $pkg_file
 if [ "$outer" = "ar" ] ; then
-  ( cd $tmp_dir && ar -crf $pkg_file ./debian-binary ./data.tar.gz ./control.tar.gz )
+  ( cd $tmp_dir && ar -crfD $pkg_file ./debian-binary ./control.tar.gz ./data.tar.$cext )
 else
-  ( cd $tmp_dir && tar -cz --format=gnu -f $pkg_file ./debian-binary ./data.tar.gz ./control.tar.gz )
+  ( cd $tmp_dir && tar -c $tsortargs --mtime=@$build_date $tarformat ./debian-binary ./control.tar.gz ./data.tar.$cext | gzip $zipargs > $pkg_file )
 fi
 
-rm $tmp_dir/debian-binary $tmp_dir/data.tar.gz $tmp_dir/control.tar.gz
+rm $tmp_dir/debian-binary $tmp_dir/data.tar.$cext $tmp_dir/control.tar.gz
 rmdir $tmp_dir
 
 echo "Packaged contents of $pkg_dir into $pkg_file"
+
+exit 0
+: <<=cut
+=head1 DESCRIPTION
+
+B<opkg-build> creates an opkg package from a filesystem tree stored in I<pkg_directory>. I<pkg_directory> must have a B<CONTROL> directory, which contains the control information files, including the control file itself. This directory will I<not> appear in the binary package's filesystem archive, but instead the files in it will be put in the binary package's control information area.
+
+B<opkg-build> will read B<CONTROL/control> file and parse it. It will check it for syntax errors and other problems, and it will stop if it finds any.
+
+If no I<destination_directory> is specified, B<opkg-build> will write the package into a file in the current directory. The name of the package file will be I<package>B<_>I<version>B<_>I<arch>B<.ipk>.
+
+If the archive to be created already exists, it will be overwritten.
+
+=head1 OPTIONS
+
+A summary of options is included below.
+
+=over
+
+=item B<-c>
+
+Generate a binary package in an older B<tar> format.
+
+=item B<-C>
+
+Stop with an error if any files ending with B<~> are found. The default behaviour is to remove such files.
+
+=item B<-Z> I<compressor>
+
+Specify which compression type to use when building a package. Allowed values are B<gzip>, B<pigz>, B<bzip2>, B<lz4> and B<xz> (default is B<gzip>).
+
+=item B<-a> I<compressor-args>
+
+Specify the arguments used by the compressor. Overrides the default values.
+
+=item B<-O>
+
+Use B<.opk> extension. By default, B<.ipk> is used.
+
+=item B<-o> I<owner>
+
+Force I<owner> as the owner of all files in the package.
+
+=item B<-g> I<group>
+
+Force I<group> as the group of all files in the package.
+
+=back
+
+=head1 FILES
+
+B<opkg-build> creates a temporary directory named B<IPKG_BUILD.>I<$$> in the destination directory (where I<$$> stands for the PID of the running B<opkg-build>). There currently isn't a way to override this.
+
+For compatibility with Debian's B<dpkg-deb>, the directory with control files can also be named B<DEBIAN>. If both B<DEBIAN> and B<CONTROL> directories present, B<CONTROL> takes the precedence.
+
+=head1 AUTHORS
+
+This manual page was written by Andrew Shadura based on the manual page of B<dpkg-deb>.
+
+=cut

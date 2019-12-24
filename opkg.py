@@ -1,4 +1,5 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-or-later
 #   Copyright (C) 2001 Alexander S. Guy <a7r@andern.org>
 #                      Andern Research Labs
 #
@@ -31,6 +32,8 @@
 #        people to say "./control.tar.gz" or "./control" when they package files.
 #        It would be much better to require ./control or disallow ./control (either)
 #        rather than letting people pick.  Some freedoms aren't worth their cost.
+from __future__ import absolute_import
+from __future__ import print_function
 
 import tempfile
 import os
@@ -43,8 +46,9 @@ from stat import ST_SIZE
 import arfile
 import tarfile
 import textwrap
+import collections
 
-class Version:
+class Version(object):
     """A class for holding parsed package version information."""
     def __init__(self, epoch, version):
         self.epoch = epoch
@@ -113,10 +117,15 @@ def parse_version(versionstr):
         epoch = int(epochstr)
     return Version(epoch, versionstr)
 
-class Package:
+class Package(object):
     """A class for creating objects to manipulate (e.g. create) opkg
        packages."""
-    def __init__(self, fn=None):
+
+    # fn: Package file path
+    # relpath: If this argument is set, the file path is given relative to this
+    #   path when a string representation of the Package object is created. If
+    #   this argument is not set, the basename of the file path is given.
+    def __init__(self, fn=None, relpath=None, all_fields=None):
         self.package = None
         self.version = 'none'
         self.parsed_version = None
@@ -146,28 +155,34 @@ class Package:
         self.fn = fn
         self.license = None
 
+        self.user_defined_fields = collections.OrderedDict()
         if fn:
             # see if it is deb format
             f = open(fn, "rb")
 
-            self.filename = os.path.basename(fn)
+            if relpath:
+                self.filename = os.path.relpath(fn, relpath)
+            else:
+                self.filename = os.path.basename(fn)
 
             ## sys.stderr.write("  extracting control.tar.gz from %s\n"% (fn,)) 
 
-            ar = arfile.ArFile(f, fn)
-            tarStream = ar.open("control.tar.gz")
+            if tarfile.is_tarfile(fn):
+                tar = tarfile.open(fn, "r", f)
+                tarStream = tar.extractfile("./control.tar.gz")
+            else:
+                ar = arfile.ArFile(f, fn)
+                tarStream = ar.open("control.tar.gz")
             tarf = tarfile.open("control.tar.gz", "r", tarStream)
-
             try:
                 control = tarf.extractfile("control")
             except KeyError:
                 control = tarf.extractfile("./control")
             try:
-                self.read_control(control)
+                self.read_control(control, all_fields)
             except TypeError as e:
                 sys.stderr.write("Cannot read control file '%s' - %s\n" % (fn, e))
             control.close()
-
         self.scratch_dir = None
         self.file_dir = None
         self.meta_dir = None
@@ -176,6 +191,9 @@ class Package:
         if name == "md5":
             self._computeFileMD5()
             return self.md5
+        elif name == "sha256":
+            self._computeFileSHA256()
+            return self.sha256
         elif name == 'size':
             return self._get_file_size()
         else:
@@ -195,6 +213,20 @@ class Package:
             f.close()
             self.md5 = sum.hexdigest()
 
+    def _computeFileSHA256(self):
+        # compute the SHA256.
+        if not self.fn:
+            self.sha256 = 'Unknown'
+        else:
+            f = open(self.fn, "rb")
+            sum = hashlib.sha256()
+            while True:
+               data = f.read(1024)
+               if not data: break
+               sum.update(data)
+            f.close()
+            self.sha256 = sum.hexdigest()
+
     def _get_file_size(self):
         if not self.fn:
             self.size = 0;
@@ -203,28 +235,36 @@ class Package:
             self.size = stat[ST_SIZE]
         return int(self.size)
 
-    def read_control(self, control):
+    def read_control(self, control, all_fields=None):
         import os
 
         line = control.readline()
         while 1:
             if not line: break
+            # Decode if stream has byte strings
+            if not isinstance(line, str):
+                line = line.decode()
             line = line.rstrip()
-            lineparts = re.match(r'([\w-]*?):\s*(.*)', str(line))
+            lineparts = re.match(r'([\w-]*?):\s*(.*)', line)
             if lineparts:
-                name = lineparts.group(1).lower()
+                name = lineparts.group(1)
+                name_lowercase = name.lower()
                 value = lineparts.group(2)
                 while 1:
-                    line = control.readline()
+                    line = control.readline().rstrip()
                     if not line: break
                     if line[0] != ' ': break
                     value = value + '\n' + line
-                if name == 'size':
+                if name_lowercase == 'size':
                     self.size = int(value)
-                elif name == 'md5sum':
+                elif name_lowercase == 'md5sum':
                     self.md5 = value
-                elif name in self.__dict__:
-                    self.__dict__[name] = value
+                elif name_lowercase == 'sha256sum':
+                    self.sha256 = value
+                elif name_lowercase in self.__dict__:
+                    self.__dict__[name_lowercase] = value
+                elif all_fields:
+                    self.user_defined_fields[name] = value
                 else:
                     print("Lost field %s, %s" % (name,value))
                     pass
@@ -344,6 +384,7 @@ class Package:
                 error = subprocess.CalledProcessError(retcode, cmd)
                 error.output = output
                 raise error
+            output = output.decode("utf-8")
             return output
 
         if not self.fn:
@@ -367,10 +408,14 @@ class Package:
             return []
         f = open(self.fn, "rb")
         ar = arfile.ArFile(f, self.fn)
-        tarStream = ar.open("data.tar.gz")
-        tarf = tarfile.open("data.tar.gz", "r", tarStream)
+        try:
+            tarStream = ar.open("data.tar.gz")
+            tarf = tarfile.open("data.tar.gz", "r", tarStream)
+        except IOError:
+            tarStream = ar.open("data.tar.xz")
+            tarf = tarfile.open("data.tar.xz", "r:xz", tarStream)
         self.file_list = tarf.getnames()
-        self.file_list = map(lambda a: ["./", ""][a.startswith("./")] + a, self.file_list)
+        self.file_list = [["./", ""][a.startswith("./")] + a for a in self.file_list]
 
         f.close()
         return self.file_list
@@ -467,7 +512,7 @@ class Package:
             ref.parsed_version = parse_version(ref.version)
         return self.parsed_version.compare(ref.parsed_version)
 
-    def __str__(self):
+    def print(self, checksum):
         out = ""
 
         # XXX - Some checks need to be made, and some exceptions
@@ -484,19 +529,23 @@ class Package:
         if self.section: out = out + "Section: %s\n" % (self.section)
         if self.architecture: out = out + "Architecture: %s\n" % (self.architecture)
         if self.maintainer: out = out + "Maintainer: %s\n" % (self.maintainer)
-        if self.md5: out = out + "MD5Sum: %s\n" % (self.md5)
+        if 'md5' in checksum:
+            if self.md5: out = out + "MD5Sum: %s\n" % (self.md5)
+        if 'sha256' in checksum:
+            if self.sha256: out = out + "SHA256sum: %s\n" % (self.sha256)
         if self.size: out = out + "Size: %d\n" % int(self.size)
         if self.installed_size: out = out + "InstalledSize: %d\n" % int(self.installed_size)
         if self.filename: out = out + "Filename: %s\n" % (self.filename)
         if self.source: out = out + "Source: %s\n" % (self.source)
-        if self.description:
-            printable_description = textwrap.dedent(self.description).strip()
-            out = out + "Description: %s\n" % textwrap.fill(printable_description, width=74, initial_indent=' ', subsequent_indent=' ')
+        if self.description: out = out + "Description: %s\n" % (self.description)
         if self.oe: out = out + "OE: %s\n" % (self.oe)
         if self.homepage: out = out + "HomePage: %s\n" % (self.homepage)
         if self.license: out = out + "License: %s\n" % (self.license)
         if self.priority: out = out + "Priority: %s\n" % (self.priority)
         if self.tags: out = out + "Tags: %s\n" % (self.tags)
+        if self.user_defined_fields:
+            for k, v in self.user_defined_fields.items():
+                out = out + "%s: %s\n" % (k, v)
         out = out + "\n"
 
         return out
@@ -506,16 +555,21 @@ class Package:
         #       are being destroyed?  -- a7r
         pass
 
-class Packages:
+class Packages(object):
     """A currently unimplemented wrapper around the opkg utility."""
     def __init__(self):
         self.packages = {}
         return
 
-    def add_package(self, pkg):
+    def add_package(self, pkg, opt_a=0):
         package = pkg.package
         arch = pkg.architecture
-        name = ("%s:%s" % (package, arch))
+        ver = pkg.version
+        if opt_a:
+            name = ("%s:%s:%s" % (package, arch, ver))
+        else:
+            name = ("%s:%s" % (package, arch))
+
         if (name not in self.packages):
             self.packages[name] = pkg
         
@@ -525,12 +579,12 @@ class Packages:
         else:
             return 1
 
-    def read_packages_file(self, fn):
+    def read_packages_file(self, fn, all_fields=None):
         f = open(fn, "r")
         while True:
             pkg = Package()
             try:
-                pkg.read_control(f)
+                pkg.read_control(f, all_fields)
             except TypeError as e:
                 sys.stderr.write("Cannot read control file '%s' - %s\n" % (fn, e))
                 continue
@@ -546,7 +600,7 @@ class Packages:
         names = list(self.packages.keys())
         names.sort()
         for name in names:
-            f.write(self.packages[name].__repr__())
+            f.write(self.packages[name].__str__())
         return    
 
     def keys(self):
