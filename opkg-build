@@ -54,19 +54,19 @@ pkg_appears_sane() {
 
 	tilde_files=`find . -name '*~' -ls -printf '\\\n'`
 	if [ -n "$tilde_files" ]; then
-	    if [ "$noclean" = "1" ]; then
-		echo "*** Warning: The following files have names ending in '~'.
+		if [ "$noclean" = "1" ]; then
+			echo "*** Warning: The following files have names ending in '~'.
 You probably want to remove them: " >&2
-		echo -e $tilde_files
-		if [ $? -ne 0 ]; then
-			echo "*** Error: Fail to list files have names ending in '~'."
-			exit 1
+			echo -e $tilde_files
+			if [ $? -ne 0 ]; then
+				echo "*** Error: Fail to list files have names ending in '~'."
+				exit 1
+			fi
+			echo >&2
+		else
+			echo "*** Removing the following files: $tilde_files"
+			rm -f "$tilde_files"
 		fi
-		echo >&2
-	    else
-		echo "*** Removing the following files: $tilde_files"
-		rm -f "$tilde_files"
-	    fi
 	fi
 
 	large_uid_files=`find . -uid +99 -ls -printf '\\\n' || true`
@@ -145,6 +145,7 @@ You probably want to chown these to a system user: " >&2
 ###
 # opkg-build "main"
 ###
+attributesargs=""
 ogargs=""
 outer=ar
 noclean=0
@@ -153,81 +154,96 @@ compressor=gzip
 zipargs="-9n"
 compressorargs=""
 
+compressor_ext() {
+	case $1 in
+		gzip|pigz)
+			echo gz
+			;;
+		bzip2)
+			echo bz2
+			;;
+		xz)
+			echo xz
+			;;
+		lz4)
+			echo lz4
+			;;
+		zstd)
+			echo zst
+			;;
+		*)
+			echo "*** Error: unsupported compression scheme: $1" >&2
+			exit 1
+			;;
+	esac
+}
+
+: <<=cut
+=head1 SYNOPSIS
+
+B<opkg-build> [B<-A>] [B<-X>] [B<-c>] [B<-C>] [B<-Z> I<compressor>] [B<-a>] [B<-O>] [B<-o> I<owner>] [B<-g> I<group>] I<pkg_directory> [I<destination_directory>]
+
+=cut
+
+usage="Usage: $0 [-A] [-X] [-c] [-C] [-Z compressor] [-a compressor_args] [-O] [-o owner] [-g group] <pkg_directory> [<destination_directory>]"
+while getopts "Aa:cCg:ho:vOXZ:" opt; do
+	case $opt in
+		A ) attributesargs="${attributesargs:+$attributesargs }--acls"
+			;;
+		X ) attributesargs="${attributesargs:+$attributesargs }--xattrs"
+			;;
+		o ) owner=$OPTARG
+			ogargs="${ogargs:+$ogargs }--owner=$owner"
+			;;
+		O ) opkext=1
+			;;
+		g ) group=$OPTARG
+			ogargs="${ogargs:+$ogargs }--group=$group"
+			;;
+		c ) outer=tar
+			;;
+		C ) noclean=1
+			;;
+		Z ) compressor=$OPTARG
+			;;
+		a ) compressorargs=$OPTARG
+			;;
+		v ) echo $version
+			exit 0
+			;;
+		h )
+			echo $usage  >&2
+			exit 0
+			;;
+		\? )
+			echo $usage  >&2
+	esac
+done
+
 # Determine if tar supports the --format argument by checking the help output.
 #
 # This is needed because:
 #    - Busybox tar doesn't support '--format'
 #    - On some Linux distros, tar now defaults to posix format if '--format'
 #      isn't explicitly specified
-#    - Opkg doesn't currently support posix format archives
+#    - Opkg currently supports posix format archives, but gnu format is left
+#      here intentionally for backward compatibility
 #
 # It's easier to check for mention of the '--format' option than to detect the
 # tar implementation and maintain a list of which support '--format'.
 tarformat=""
-if tar --help 2>&1 | grep -- "--format" > /dev/null;
-then
-    tarformat="--format=gnu"
+if tar --help 2>&1 | grep -- "--format" > /dev/null; then
+	# For ACLs or xattr support, gnu format will not work
+	# we need to set posix format instead
+	if [ ! -z "$attributesargs" ] ; then
+		tarformat="--format=posix"
+	else
+		tarformat="--format=gnu"
+	fi
+elif [ ! -z "$attributesargs" ] ; then
+	echo "*** Error: Attributes: $attributesargs, don't work, without posix format, which is not supported by host's tar command." >&2
+	exit 1
 fi
-
-compressor_ext() {
-    case $1 in
-	gzip|pigz)
-	    echo gz
-	    ;;
-	bzip2)
-	    echo bz2
-	    ;;
-	xz)
-	    echo xz
-	    ;;
-	lz4)
-	    echo lz4
-	    ;;
-
-	*)
-	    echo "*** Error: unsupported compression scheme: $1" >&2
-	    exit 1
-	    ;;
-    esac
-}
-
-: <<=cut
-=head1 SYNOPSIS
-
-B<opkg-build> [B<-c>] [B<-C>] [B<-Z> I<compressor>] [B<-a>] [B<-O>] [B<-o> I<owner>] [B<-g> I<group>] I<pkg_directory> [I<destination_directory>]
-
-=cut
-
-usage="Usage: $0 [-c] [-C] [-Z compressor] [-a] [-O] [-o owner] [-g group] <pkg_directory> [<destination_directory>]"
-while getopts "a:cCg:ho:vOZ:" opt; do
-    case $opt in
-	o ) owner=$OPTARG
-	    ogargs="--owner=$owner"
-	    ;;
-	O ) opkext=1
-	    ;;
-	g ) group=$OPTARG
-	    ogargs="$ogargs --group=$group"
-	    ;;
-	c ) outer=tar
-	    ;;
-	C ) noclean=1
-	    ;;
-	Z ) compressor=$OPTARG
-	    ;;
-	a ) compressorargs=$OPTARG
-	    ;;
-	v ) echo $version
-	    exit 0
-	    ;;
-	h )
-	    echo $usage  >&2
-	    exit 0
-	    ;;
-	\? )
-	    echo $usage  >&2
-    esac
-done
 
 cext=$(compressor_ext $compressor)
 
@@ -256,19 +272,21 @@ shift $(($OPTIND - 1))
 # continue on to process additional arguments
 
 case $# in
-1)
-	dest_dir=$PWD
-	;;
-2)
-	dest_dir=$2
-	if [ "$dest_dir" = "." -o "$dest_dir" = "./" ] ; then
-	    dest_dir=$PWD
-	fi
-	;;
-*)
-	echo $usage >&2
-	exit 1 
-	;;
+	1)
+		dest_dir=$PWD
+		;;
+	2)
+		dest_dir=$2
+		if [ "$dest_dir" = "." -o "$dest_dir" = "./" ] ; then
+			dest_dir=$PWD
+		else
+			mkdir -p "$dest_dir"
+		fi
+		;;
+	*)
+		echo $usage >&2
+		exit 1
+		;;
 esac
 
 pkg_dir=$1
@@ -296,19 +314,31 @@ fi
 tmp_dir=$dest_dir/IPKG_BUILD.$$
 mkdir $tmp_dir
 
-build_date="${SOURCE_DATE_EPOCH:-$(date +%s)}"
-
-mtime_args=""
+mtime_args="--mtime=@${SOURCE_DATE_EPOCH:-$(date +%s)}"
 # --clamp-mtime requires tar > 1.28. Only use it if SOURCE_DATE_EPOCH is set, to avoid having a generic case dependency on tar > 1.28.
 # this setting will make sure files generated at build time have consistent mtimes, for reproducible builds.
 if [ ! -z "$SOURCE_DATE_EPOCH"  ]; then
-    mtime_args="--mtime=@$build_date --clamp-mtime"
+	mtime_args="$mtime_args --clamp-mtime"
 fi
 
-( cd $pkg_dir/$CONTROL && find . -type f > $tmp_dir/control_list )
-( cd $pkg_dir && find . -path ./$CONTROL -prune -o -path . -o -print  > $tmp_dir/file_list )
-( cd $pkg_dir && tar $ogargs $tsortargs --no-recursion $mtime_args -c $tarformat -T $tmp_dir/file_list | $compressor $compressorargs > $tmp_dir/data.tar.$cext )
-( cd $pkg_dir/$CONTROL && tar $ogargs $tsortargs --no-recursion --mtime=@$build_date -c $tarformat -T $tmp_dir/control_list | gzip $zipargs > $tmp_dir/control.tar.gz )
+# Notice, that if you create an archive in POSIX format (see section GNU tar and POSIX tar) and the environment variable POSIXLY_CORRECT is set,
+# then the two archives created using the same options on the same set of files will not be byte-to-byte equivalent even with the above option.
+# This is because the posix default for extended header names includes the PID of the tar process, which is different at each run. To produce
+# byte-to-byte equivalent archives in this case, either unset POSIXLY_CORRECT, or use the following option:
+#
+# --pax-option=exthdr.name=%d/PaxHeaders/%f,atime:=0,ctime:=0
+#
+# https://www.gnu.org/software/tar/manual/html_node/PAX-keywords.html
+if [[ "$tarformat" == "--format=posix" ]]; then
+	mtime_args="$mtime_args --pax-option=exthdr.name=%d/PaxHeaders/%f,atime:=0,ctime:=0"
+fi
+
+export LANG=C
+export LC_ALL=C
+( cd $pkg_dir/$CONTROL && find . -type f | sort > $tmp_dir/control_list )
+( cd $pkg_dir && find . -path ./$CONTROL -prune -o -path . -o -print  | sort > $tmp_dir/file_list )
+( cd $pkg_dir && tar $attributesargs $ogargs $tsortargs --no-recursion $mtime_args -c $tarformat -T $tmp_dir/file_list | $compressor $compressorargs > $tmp_dir/data.tar.$cext )
+( cd $pkg_dir/$CONTROL && tar $ogargs $tsortargs --no-recursion $mtime_args -c $tarformat -T $tmp_dir/control_list | gzip $zipargs > $tmp_dir/control.tar.gz )
 rm $tmp_dir/file_list
 rm $tmp_dir/control_list
 
@@ -322,9 +352,9 @@ fi
 
 rm -f $pkg_file
 if [ "$outer" = "ar" ] ; then
-  ( cd $tmp_dir && ar -crfD $pkg_file ./debian-binary ./control.tar.gz ./data.tar.$cext )
+	( cd $tmp_dir && ar -crfD $pkg_file ./debian-binary ./control.tar.gz ./data.tar.$cext )
 else
-  ( cd $tmp_dir && tar -c $tsortargs --mtime=@$build_date $tarformat ./debian-binary ./control.tar.gz ./data.tar.$cext | gzip $zipargs > $pkg_file )
+	( cd $tmp_dir && tar -c $tsortargs $mtime_args $tarformat ./debian-binary ./control.tar.gz ./data.tar.$cext | gzip $zipargs > $pkg_file )
 fi
 
 rm $tmp_dir/debian-binary $tmp_dir/data.tar.$cext $tmp_dir/control.tar.gz
@@ -360,7 +390,7 @@ Stop with an error if any files ending with B<~> are found. The default behaviou
 
 =item B<-Z> I<compressor>
 
-Specify which compression type to use when building a package. Allowed values are B<gzip>, B<pigz>, B<bzip2>, B<lz4> and B<xz> (default is B<gzip>).
+Specify which compression type to use when building a package. Allowed values are B<gzip>, B<pigz>, B<bzip2>, B<lz4>, B<xz> and B<zstd> (default is B<gzip>).
 
 =item B<-a> I<compressor-args>
 

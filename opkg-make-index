@@ -15,6 +15,7 @@ import subprocess
 
 import opkg
 
+
 def to_morgue(filename, pkg_dir, verbose):
     """ Move files to morgue folder """
     morgue_dir = pkg_dir + "/morgue"
@@ -27,6 +28,7 @@ def to_morgue(filename, pkg_dir, verbose):
     if os.path.exists(pkg_dir + "/" + filename + ".asc"):
         os.rename(pkg_dir + "/" + filename + ".asc", morgue_dir + "/" + filename + ".asc")
 
+
 def to_locale(filename, locale, pkg_dir, locales_dir, verbose):
     """ Move file to locale_dir"""
     locale_dir = pkg_dir + '/' + locales_dir + '/' + locale + "/"
@@ -37,6 +39,7 @@ def to_locale(filename, locale, pkg_dir, locales_dir, verbose):
     os.rename(pkg_dir + "/" + filename, locale_dir + "/" + filename)
     if os.path.exists(pkg_dir + "/" + filename + ".asc"):
         os.rename(pkg_dir + "/" + filename + ".asc", locale_dir + "/" + filename + ".asc")
+
 
 def main():
     """ Script entry point """
@@ -221,9 +224,7 @@ def main():
             try:
                 if verbose:
                     sys.stderr.write("Reading filelist for package '%s'\n" % name)
-#                sys.stderr.write("Package for name '%s':\n'%s'\n" % (name, packages[name]))
                 file_list = packages[name].get_file_list_dir(pkg_dir)
-#                sys.stderr.write("Filelist for package '%s': '%s'\n" % (name, fnlist))
             except OSError as ex:
                 sys.stderr.write("Package %s disappeared on us!\n(%s)\n" % (name, ex))
                 continue
@@ -235,9 +236,9 @@ def main():
                 if not filename:
                     continue
                 if filename not in files:
-                    files[filename] = name+':'+filepath
+                    files[filename] = name + ':' + filepath
                 else:
-                    files[filename] = files[filename] + ',' + name+':'+filepath
+                    files[filename] = files[filename] + ',' + name + ':' + filepath
 
         tmp_filelist_filename = ("%s.%d" % (filelist_filename, os.getpid()))
         with open(tmp_filelist_filename, "w") as tmp_filelist_filename_hdl:
@@ -248,6 +249,7 @@ def main():
         if posixpath.exists(filelist_filename):
             os.unlink(filelist_filename)
         os.rename(tmp_filelist_filename, filelist_filename)
+
 
 if __name__ == "__main__":
     sys.exit(main())

@@ -1,7 +1,20 @@
-UTILS = opkg-build opkg-unbuild opkg-make-index opkg.py opkg-list-fields \
-	arfile.py opkg-buildpackage opkg-diff opkg-extract-file opkg-show-deps \
-	opkg-compare-indexes update-alternatives \
-	opkg-ls opkg_hash.py opkg-md5
+UTILS = \
+	arfile.py \
+	opkg-build \
+	opkg-buildpackage \
+	opkg-compare-indexes \
+	opkg-diff \
+	opkg-extract-file \
+	opkg-feed \
+	opkg-list-fields \
+	opkg-make-index \
+	opkg-show-deps \
+	opkg-unbuild \
+	opkg.py \
+	update-alternatives \
+	opkg-ls \
+	opkg_hash.py \
+	opkg-md5
 
 MANPAGES = opkg-build.1
 
@@ -17,9 +30,11 @@ mandir ?= $(PREFIX)/man
 
 all: $(UTILS) $(MANPAGES)
 
-install: all
+install-utils: $(UTILS)
 	install -d $(DESTDIR)$(bindir)
 	install -m 755 $(UTILS) $(DESTDIR)$(bindir)
+
+install-docs: $(MANPAGES)
 	install -d $(DESTDIR)$(mandir)
 	for m in $(MANPAGES); \
 	do \
@@ -27,4 +42,6 @@ install: all
 		install -m 644 "$$m" $(DESTDIR)$(mandir)/man$${m##*.}; \
 	done
 
-.PHONY: install all
+install: install-utils install-docs
+
+.PHONY: install install-utils install-docs all
