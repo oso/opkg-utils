@@ -45,6 +45,7 @@ from stat import ST_SIZE
 import arfile
 import tarfile
 import collections
+import pyzstd
 
 
 def order(x):
@@ -190,13 +191,8 @@ class Package(object):
             else:
                 self.filename = os.path.basename(fn)
 
-            if tarfile.is_tarfile(fn):
-                tar = tarfile.open(fn, "r", f)
-                tarStream = tar.extractfile("./control.tar.gz")
-            else:
-                ar = arfile.ArFile(f, fn)
-                tarStream = ar.open("control.tar.gz")
-            tarf = tarfile.open("control.tar.gz", "r", tarStream)
+            ar = arfile.ArFile(f, fn)
+            tarf = self._open_compressed_archive(ar, "control.tar")
             try:
                 control = tarf.extractfile("control")
             except KeyError:
@@ -221,6 +217,23 @@ class Package(object):
             return self._get_file_size()
         else:
             raise AttributeError(name)
+
+    def _open_compressed_archive(self, ar, name):
+        for ext in ['gz', 'xz', 'bz2', 'zst']:
+            try:
+                fileStream = ar.open(f"{name}.{ext}")
+                if ext == 'zst':
+                    import tempfile
+                    tmpf = tempfile.NamedTemporaryFile()
+                    tmpf.write(fileStream.read())
+                    fobj = pyzstd.ZstdFile(tmpf.name, mode='r')
+                    return tarfile.open(fileobj=fobj)
+
+                return tarfile.open(f"{name}.{ext}", f"r:{ext}", fileStream)
+            except IOError:
+                continue
+
+        raise IOError(f"Could not open compressed archive {name} with supported extensions")
 
     def _computeFileMD5(self):
         # compute the MD5.
@@ -433,12 +446,7 @@ class Package(object):
             return []
         f = open(self.fn, "rb")
         ar = arfile.ArFile(f, self.fn)
-        try:
-            tarStream = ar.open("data.tar.gz")
-            tarf = tarfile.open("data.tar.gz", "r", tarStream)
-        except IOError:
-            tarStream = ar.open("data.tar.xz")
-            tarf = tarfile.open("data.tar.xz", "r:xz", tarStream)
+        tarf = self._open_compressed_archive(ar, "data.tar")
         self.file_list = tarf.getnames()
         self.file_list = [["./", ""][a.startswith("./")] + a for a in self.file_list]
 
@@ -451,12 +459,7 @@ class Package(object):
             return []
         f = open(self.fn, "rb")
         ar = arfile.ArFile(f, self.fn)
-        try:
-            tarStream = ar.open("data.tar.gz")
-            tarf = tarfile.open("data.tar.gz", "r", tarStream)
-        except IOError:
-            tarStream = ar.open("data.tar.xz")
-            tarf = tarfile.open("data.tar.xz", "r:xz", tarStream)
+        tarf = self._open_compressed_archive(ar, "data.tar")
         member_list = tarf.getmembers()
         f.close()
 
@@ -467,12 +470,7 @@ class Package(object):
             return None
         f = open(self.fn, "rb")
         ar = arfile.ArFile(f, self.fn)
-        try:
-            tarStream = ar.open("data.tar.gz")
-            tarf = tarfile.open("data.tar.gz", "r", tarStream)
-        except:
-            tarStream = ar.open("data.tar.xz")
-            tarf = tarfile.open("data.tar.xz", "r:xz", tarStream)
+        tarf = self._open_compressed_archive(ar, "data.tar")
         fh = tarf.extractfile(filename)
 
         return fh
